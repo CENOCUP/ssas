@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="pt-pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FIFA DATABASE - Ultimate Edition</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --bg: #050506; --card: #111113; --neon: #00ff87; --danger: #ff4444; --text: #fff; --dim: #888; --blue: #00d4ff; --gold: #ffd700; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { width: 100%; max-width: 1300px; }
+        
+        header { text-align: center; margin-bottom: 20px; cursor: pointer; border-bottom: 1px solid #222; padding-bottom: 15px; }
+        h1 span { color: var(--neon); }
+
+        #adminPanel { display: none; background: #1a1a1e; padding: 20px; border-radius: 15px; margin-bottom: 25px; border: 1px solid var(--neon); box-shadow: 0 0 20px rgba(0,255,135,0.1); }
+        .btn-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        .btn { padding: 12px; border-radius: 8px; cursor: pointer; font-weight: 700; border: none; text-transform: uppercase; font-size: 0.75rem; transition: 0.2s; flex: 1; }
+        .btn-green { background: var(--neon); color: #000; }
+        .btn-blue { background: var(--blue); color: #fff; }
+        .btn-orange { background: #ff9900; color: #fff; }
+        
+        .tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 25px; }
+        .tab-btn { background: #222; color: #fff; padding: 10px 30px; border-radius: 20px; border: 1px solid #333; cursor: pointer; font-weight: bold; }
+        .tab-btn.active { background: var(--neon); color: #000; border-color: var(--neon); }
+
+        .gallery-grid { display: none; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+        .champ-card { background: var(--card); border-radius: 20px; padding: 25px; border: 1px solid #222; text-align: center; border-top: 4px solid var(--gold); }
+        .row-edit { display: flex; gap: 5px; margin-bottom: 5px; }
+        input { background: #111; border: 1px solid #333; color: #fff; padding: 8px; border-radius: 5px; text-align: center; font-size: 0.8rem; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th { color: var(--dim); font-size: 0.7rem; padding: 12px; border-bottom: 2px solid #222; }
+        td { padding: 12px; border-bottom: 1px solid #1a1a1e; text-align: center; }
+        .hall-summary { background: #111; padding: 20px; border-radius: 15px; margin-bottom: 25px; display: flex; justify-content: center; gap: 30px; border: 1px solid #222; flex-wrap: wrap; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header onclick="solicitarAcesso()">
+        <h1>FIFA <span>DATABASE</span></h1>
+        <p style="color:var(--dim); font-size: 0.8rem;">ULTIMATE EDITION - COM BACKUP & GALERIA</p>
+    </header>
+
+    <div id="adminPanel">
+        <h3 style="color:var(--neon); margin-top:0">🗄️ SEGURANÇA E DADOS</h3>
+        <div class="btn-group">
+            <button class="btn btn-blue" onclick="exportar()">📥 FAZER BACKUP (.JSON)</button>
+            <button class="btn btn-orange" onclick="importar()">📤 RESTAURAR DADOS</button>
+        </div>
+
+        <h3 style="color:var(--neon)">⚙️ EDITOR TEMPORADA ATUAL</h3>
+        <div id="editor"></div>
+        <button onclick="addPlayer()" class="btn" style="background:#222; color:#888; width:100%; margin-top:5px">+ NOVO JOGADOR</button>
+        
+        <h3 style="color:var(--gold); margin-top:25px">📖 EDITAR GALERIA / HISTÓRICO</h3>
+        <div id="historyEditor"></div>
+        
+        <button class="btn btn-green" onclick="salvar()" style="margin-top:20px; width:100%; height:50px">💾 SALVAR TUDO</button>
+        <button class="btn" style="background:#400; color:#f66; margin-top:10px; width:100%" onclick="encerrarTemporada()">🔒 FINALIZAR ÉPOCA ATUAL</button>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('main')">TABELA</button>
+        <button class="tab-btn" onclick="switchTab('gallery')">GALERIA</button>
+    </div>
+
+    <div id="mainContent">
+        <div style="text-align:center;">
+            <select id="viewSelect" onchange="mudarView(this.value)" style="background:#111; color:var(--neon); padding:10px; border-radius:10px; border:1px solid #333; margin-bottom:20px;"></select>
+        </div>
+        <div id="tableArea"></div>
+    </div>
+
+    <div id="galleryContent" style="display:none;">
+        <div id="hallSummary" class="hall-summary"></div>
+        <div id="galleryGrid" class="gallery-grid"></div>
+    </div>
+</div>
+
+<script>
+    const KEY = 'fifa_ultimate_v45';
+    let db = JSON.parse(localStorage.getItem(KEY)) || { atual: [], historico: [] };
+    let modo = 'atual';
+    let acesso = false;
+
+    function solicitarAcesso() { if(prompt("Senha:") === '123') { acesso = true; document.getElementById('adminPanel').style.display='block'; render(); } }
+
+    function switchTab(t) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('mainContent').style.display = (t === 'main') ? 'block' : 'none';
+        document.getElementById('galleryContent').style.display = (t === 'gallery') ? 'block' : 'none';
+        document.querySelector(`.tab-btn:${t === 'main' ? 'first-child' : 'last-child'}`).classList.add('active');
+        t === 'gallery' ? renderGallery() : render();
+    }
+
+    function render() {
+        atualizarMenu();
+        const area = document.getElementById('tableArea');
+        let lista = (modo === 'atual') ? [...db.atual] : (modo === 'geral' ? processarGeral() : [...db.historico[modo].dados]);
+        lista.sort((a,b) => ((b.v*3)+b.e) - ((a.v*3)+a.e) || (b.gp-b.gc) - (a.gp-a.gc));
+
+        area.innerHTML = `<table style="width:100%; border-collapse:collapse">
+            <thead><tr style="color:var(--dim); font-size:0.7rem"><th>POS</th><th style="text-align:left">JOGADOR</th><th>PTS</th><th>V</th><th>E</th><th>D</th><th>GF</th><th>GS</th><th style="color:var(--gold)">FORÇA</th></tr></thead>
+            <tbody>${lista.map((j,i)=>`
+                <tr style="border-bottom:1px solid #111">
+                    <td>${i+1}º</td><td style="text-align:left"><b>${j.nome}</b></td>
+                    <td style="color:var(--neon)">${(j.v*3)+j.e}</td><td>${j.v}</td><td>${j.e}</td><td>${j.d}</td>
+                    <td>${j.gp}</td><td>${j.gc}</td>
+                    <td style="color:var(--gold)">${((j.gp*3.5)-(j.gc*2.5)).toFixed(1)}</td>
+                </tr>`).join('')}</tbody>
+        </table>`;
+        if(acesso) renderEditors();
+    }
+
+    function renderEditors() {
+        document.getElementById('editor').innerHTML = db.atual.map((j,i)=>`
+            <div class="row-edit">
+                <input style="flex:2" type="text" value="${j.nome}" onchange="db.atual[${i}].nome=this.value">
+                <input style="flex:1" type="number" value="${j.gp}" onchange="db.atual[${i}].gp=parseInt(this.value)">
+                <input style="flex:1" type="number" value="${j.gc}" onchange="db.atual[${i}].gc=parseInt(this.value)">
+                <input style="flex:1" type="number" value="${j.v}" onchange="db.atual[${i}].v=parseInt(this.value)">
+                <input style="flex:1" type="number" value="${j.e}" onchange="db.atual[${i}].e=parseInt(this.value)">
+                <input style="flex:1" type="number" value="${j.d}" onchange="db.atual[${i}].d=parseInt(this.value)">
+                <button onclick="db.atual.splice(${i},1);salvar()" style="color:red;background:none;border:none;cursor:pointer">✖</button>
+            </div>`).join('');
+
+        document.getElementById('historyEditor').innerHTML = db.historico.map((h, i)=>`
+            <div style="background:#000; padding:10px; border-radius:8px; margin-top:5px; border:1px solid #222">
+                <div style="font-size:0.7rem; color:var(--gold)">ÉPOCA: ${h.nome}</div>
+                <div class="row-edit">
+                    <input style="flex:2" type="text" value="${h.dados[0].nome}" onchange="db.historico[${i}].dados[0].nome=this.value">
+                    <input style="flex:2" type="text" value="${h.dados[0].time || ''}" onchange="db.historico[${i}].dados[0].time=this.value" placeholder="Time">
+                    <button onclick="db.historico.splice(${i},1);salvar()" style="color:red;border:none;background:none;cursor:pointer">✖</button>
+                </div>
+            </div>`).join('');
+    }
+
+    function renderGallery() {
+        const grid = document.getElementById('galleryGrid');
+        const summary = document.getElementById('hallSummary');
+        grid.innerHTML = ''; let tits = {};
+        db.historico.forEach(h => {
+            const c = h.dados[0]; tits[c.nome] = (tits[c.nome] || 0) + 1;
+            grid.innerHTML += `<div class="champ-card">
+                <div class="season-name">${h.nome}</div><h3>${c.nome}</h3>
+                <span style="color:var(--gold);font-style:italic">${c.time || ''}</span>
+            </div>`;
+        });
+        summary.innerHTML = Object.entries(tits).map(([n,q])=>`<div style="text-align:center"><b style="font-size:1.5rem;color:var(--gold)">${q}</b><br><small>${n}</small></div>`).join('') || "Sem dados";
+        grid.style.display = 'grid';
+    }
+
+    function exportar() {
+        const data = JSON.stringify(db);
+        const blob = new Blob([data], {type: 'application/json'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `fifa_backup_${new Date().toLocaleDateString()}.json`;
+        a.click();
+    }
+
+    function importar() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.onchange = e => {
+            const reader = new FileReader();
+            reader.readAsText(e.target.files[0]);
+            reader.onload = ev => {
+                db = JSON.parse(ev.target.result);
+                salvar();
+                location.reload();
+            };
+        };
+        input.click();
+    }
+
+    function salvar() { localStorage.setItem(KEY, JSON.stringify(db)); render(); }
+    function addPlayer() { db.atual.push({nome:"Novo", v:0, e:0, d:0, gp:0, gc:0}); render(); }
+    function encerrarTemporada() {
+        let n = prompt("Nome da Época:");
+        if(n) {
+            db.atual.sort((a,b) => ((b.v*3)+b.e) - ((a.v*3)+a.e));
+            let t = prompt(`Time do ${db.atual[0].nome}:`);
+            db.atual[0].time = t;
+            db.historico.push({ nome: n, dados: JSON.parse(JSON.stringify(db.atual)) });
+            db.atual = db.atual.map(j => ({ ...j, v:0, e:0, d:0, gp:0, gc:0 }));
+            salvar();
+        }
+    }
+    function atualizarMenu() {
+        const s = document.getElementById("viewSelect");
+        s.innerHTML = '<option value="atual">Temporada Atual</option><option value="geral">Ranking Geral</option>';
+        db.historico.forEach((t, i) => s.innerHTML += `<option value="${i}">Época: ${t.nome}</option>`);
+    }
+    function processarGeral() {
+        let res = {};
+        [...db.historico.flatMap(h => h.dados), ...db.atual].forEach(j => {
+            if(!res[j.nome]) res[j.nome] = {nome:j.nome, v:0, e:0, d:0, gp:0, gc:0};
+            res[j.nome].v += j.v; res[j.nome].e += j.e; res[j.nome].d += j.d;
+            res[j.nome].gp += j.gp; res[j.nome].gc += j.gc;
+        });
+        return Object.values(res);
+    }
+    render();
+</script>
+</body>
+</html>
